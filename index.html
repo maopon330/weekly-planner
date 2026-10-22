@@ -75,7 +75,7 @@ h1{font-family:var(--f-display);font-weight:800;font-size:clamp(26px,4vw,40px);l
 
 /* main split */
 .main{display:grid;grid-template-columns:1fr;gap:20px}
-@media (min-width:1150px){.main{grid-template-columns:minmax(420px,5fr) 7fr;align-items:start}
+@media (min-width:900px){.main{grid-template-columns:minmax(300px,4fr) 7fr;align-items:start}
   .calcard{position:sticky;top:12px}}
 .lists{scroll-margin-top:60px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
 @media (min-width:1150px){.lists{grid-template-columns:1fr 1fr}}
@@ -172,7 +172,12 @@ h1{font-family:var(--f-display);font-weight:800;font-size:clamp(26px,4vw,40px);l
 .c-karuta{--cl:var(--karuta-l);--cd:var(--karuta-d);--ct:var(--karuta-t)}
 .c-other{--cl:var(--other-l);--cd:var(--other-d);--ct:var(--other-t)}
 .jump{display:none}
-@media (max-width:1149px){
+.placebar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:110;display:flex;align-items:center;gap:10px;
+  background:var(--ink);color:var(--bg);padding:8px 8px 8px 16px;border-radius:999px;box-shadow:var(--shadow);font-size:13.5px;max-width:calc(100vw - 32px)}
+.placebar .btn{background:var(--bg);color:var(--ink);border-color:var(--bg)}
+body.placing .col{cursor:crosshair}
+body.placing .col:hover{background-color:color-mix(in srgb,var(--karuta-d) 10%,transparent)}
+@media (max-width:899px){
   .jump{display:flex;position:sticky;top:env(safe-area-inset-top,0px);z-index:20;gap:6px;padding:8px 0;background:var(--bg)}
   .jump button{flex:1;border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 0;font-weight:700;font-family:var(--f-display)}
   .jump button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
@@ -569,7 +574,7 @@ function openPop(x,y,html,bind){
   const f=p.querySelector('input,select');f&&f.focus({preventScroll:true});
 }
 document.addEventListener('pointerdown',e=>{if(popEl&&!popEl.contains(e.target)&&!e.target.closest('.overlay'))closePop()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePop();closeModal()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePop();closeModal();stopPlacing()}});
 
 const dayOptions=sel=>DOW.map((d,i)=>`<option value="${i}" ${i===sel?'selected':''}>${d}曜</option>`).join('');
 const durOptions=sel=>[15,30,45,60,90,120,150,180,240].map(m=>`<option value="${m}" ${m===sel?'selected':''}>${m<60?m+'分':(m/60)+'時間'}</option>`).join('');
@@ -586,6 +591,7 @@ function taskPop(id,x,y){
       <div class="field">取り組む曜日<select id="pt-day">${dayOptions(t.place?t.place.day:todayIdx())}</select></div>
     </div>
     <button class="btn primary" id="pt-auto">空き時間に自動で入れる</button>
+    <button class="btn" id="pt-pick">カレンダーをタップして置く</button>
     <div class="btns">
       ${t.place?'<button class="btn" id="pt-unplace">カレンダーから外す</button>':''}
       <button class="btn" id="pt-star">${rec?'毎週をやめる':'★毎週にする'}</button>
@@ -597,6 +603,10 @@ function taskPop(id,x,y){
       const nm=p.querySelector('#pt-title').value.trim();if(nm)t.title=nm;
       if(autoPlace(t,day,dur)){save();render();closePop();toast(`${DOW[day]}曜 ${fmt(t.place.start)}–${fmt(t.place.end%1440)} に入れました`)}
       else toast(`${DOW[day]}曜の10:00–25:00に${dur}分の空きがありません`);
+    };
+    p.querySelector('#pt-pick').onclick=()=>{
+      const nm=p.querySelector('#pt-title').value.trim();if(nm)t.title=nm;
+      startPlacing(t,+p.querySelector('#pt-dur').value);
     };
     const un=p.querySelector('#pt-unplace');un&&(un.onclick=()=>{t.place=null;save();render();closePop()});
     p.querySelector('#pt-star').onclick=()=>{
@@ -667,6 +677,25 @@ function mtgPop(id,src,x,y){
   openPop(x,y,`<h3>${esc(m.title)}</h3><div class="sub">${fmt(m.start)}–${fmt(m.end)}・.icsから取り込み</div>`,()=>{});
 }
 
+/* ---------- tap to place ---------- */
+let placing=null;
+function startPlacing(t,dur){
+  placing={t,dur};closePop();document.body.classList.add('placing');
+  let bn=$('#placeBanner');if(!bn){bn=document.createElement('div');bn.id='placeBanner';bn.className='placebar';document.body.appendChild(bn)}
+  bn.innerHTML=`<span>「${esc(t.title)}」（${dur}分）を置く日時をカレンダーでタップ</span><button class="btn" id="pb-cancel">やめる</button>`;
+  bn.querySelector('#pb-cancel').onclick=stopPlacing;
+  $('.calcard').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function stopPlacing(){placing=null;document.body.classList.remove('placing');const bn=$('#placeBanner');bn&&bn.remove()}
+$('#calgrid').addEventListener('click',e=>{
+  if(!placing)return;const col=e.target.closest('.col');if(!col)return;
+  e.stopPropagation();
+  const t=placing.t,dur=placing.dur;
+  let s=snap(minAt(col,e.clientY)-Math.min(15,dur/2));s=Math.max(START,Math.min(END-dur,s));
+  t.place={day:+col.dataset.day,start:s,end:s+dur};t.dur=dur;
+  stopPlacing();save();render();toast(`${DOW[t.place.day]}曜 ${fmt(s)}–${fmt((s+dur)%1440)} に置きました`);
+});
+
 /* ---------- drag & drop ---------- */
 let drag=null;
 const scroller=$('#calscroll');
@@ -682,13 +711,13 @@ document.addEventListener('pointerdown',e=>{
     const t=week().tasks.find(z=>z.id===chip.dataset.drag);if(!t)return;
     drag={kind:'chip',t,x0:e.clientX,y0:e.clientY,moved:false,dur:t.place?t.place.end-t.place.start:(t.dur||60),src:chip};
     e.preventDefault();
-  }else if(evt&&evt.dataset.task){
+  }else if(evt&&evt.dataset.task&&!placing){
     const t=week().tasks.find(z=>z.id===evt.dataset.task);if(!t)return;
     const col=evt.closest('.col');
     drag={kind:e.target.dataset.grip?'resize':'move',t,x0:e.clientX,y0:e.clientY,moved:false,dur:t.place.end-t.place.start,
       off:minAt(col,e.clientY)-t.place.start,el:evt};
     e.preventDefault();
-  }else if(evt){
+  }else if(evt&&!placing){
     drag={kind:'click',el:evt,x0:e.clientX,y0:e.clientY,moved:false};
   }
 });
@@ -717,7 +746,7 @@ function computeDrop(x,y){
 }
 function updatePreview(x,y){
   const d=computeDrop(x,y);
-  if(!d){drag.pv&&drag.pv.remove();drag.pv=null;return}
+  if(!d){drag.pv&&drag.pv.remove();drag.pv=null;drag.last=null;return}
   if(!drag.pv){drag.pv=document.createElement('div');drag.pv.className=`preview c-${drag.t.cat}`}
   if(drag.pv.parentNode!==d.col)d.col.appendChild(drag.pv);
   const P=ppm();drag.pv.style.top=(d.start-START)*P+'px';drag.pv.style.height=((d.end-d.start)*P-2)+'px';
@@ -744,7 +773,7 @@ document.addEventListener('pointerup',e=>{
     }
     return;
   }
-  const drop=d.last&&(d.kind==='resize'?d.last:computeDrop(e.clientX,e.clientY));
+  const drop=d.last;
   if(!drop){if(d.kind==='move'){/* dropped outside: keep */}render();return}
   d.t.place={day:drop.day,start:drop.start,end:drop.end};d.t.dur=drop.end-drop.start;
   save();render();
